@@ -24,7 +24,7 @@ jobs:
           dotnet-quality: 'preview'
 
       - name: Publish ${{ matrix.rid }}
-        run: dotnet publish -c Release -r ${{ matrix.rid }} -p:PublishSingleFile=true --self-contained true -o ./publish
+        run: dotnet publish -c Release -r ${{ matrix.rid }} -p:PublishSingleFile=true -o ./publish
 
       - name: Rename Executable
         run: mv ./publish/lrg.exe ./LiveReleaseGet-${{ github.ref_name }}-${{ matrix.rid }}.exe
