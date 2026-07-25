@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        rid: [win-x64, win-x86, win-arm64]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Publish ${{ matrix.rid }}
+        run: dotnet publish -c Release -r ${{ matrix.rid }} -p:PublishSingleFile=true --self-contained true -o ./publish
+
+      - name: Rename Executable
+        run: mv ./publish/lrg.exe ./LiveReleaseGet-${{ github.ref_name }}-${{ matrix.rid }}.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./LiveReleaseGet-${{ github.ref_name }}-${{ matrix.rid }}.exe
+          generate_release_notes: true

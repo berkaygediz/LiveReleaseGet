@@ -1,103 +1,114 @@
-﻿using Octokit;
-using System.Net;
+﻿using System.Net.Http.Json;
 
-var github = new GitHubClient(new ProductHeaderValue("LiveReleaseGet"));
+using HttpClient http = new();
+http.DefaultRequestHeaders.UserAgent.ParseAdd("LiveReleaseGet");
 
+Directory.CreateDirectory("Downloads");
 Console.WriteLine("Live Release Get - Berkay Gediz");
-start:
-Console.WriteLine("\nGitHub Username:");
-#pragma warning disable CS8600
-string username = Console.ReadLine();
-#pragma warning restore CS8600
 
-Console.WriteLine("Repo:");
-#pragma warning disable CS8600
-string repo = Console.ReadLine();
-#pragma warning restore CS8600
-
-Console.WriteLine($"Do you want the {username}/{repo} source code? (1 or 0)");
-#pragma warning disable CS8600
-string request = Console.ReadLine();
-#pragma warning restore CS8600
-
-static void SourceCodeDownload(string username, string repo, string branch)
+while (true)
 {
-    if (username != null || repo != null)
+    Console.WriteLine("\nHost (github.com, codeberg.org, gitea.com - default: github.com):");
+    string? host = Console.ReadLine();
+    if (string.IsNullOrWhiteSpace(host)) host = "github.com";
+    if (host.ToLower() == "exit") break;
+
+    Console.WriteLine("Username/Org:");
+    string? username = Console.ReadLine();
+    if (string.IsNullOrWhiteSpace(username)) continue;
+
+    Console.WriteLine("Repo:");
+    string? repo = Console.ReadLine();
+    if (string.IsNullOrWhiteSpace(repo)) continue;
+
+    Console.WriteLine("Download source code? (1 or 0)");
+    string? getSource = Console.ReadLine();
+
+    try
     {
-        string url = $"https://github.com/{username}/{repo}/archive/{branch}.zip";
-        string filename = $"{repo}_{branch}.zip";
-        string filepath = Path.Combine(Environment.CurrentDirectory, filename);
+        Console.WriteLine("-> Fetching latest release...");
+        string apiUrl = host == "github.com"
+            ? $"https://api.github.com/repos/{username}/{repo}/releases/latest"
+            : $"https://{host}/api/v1/repos/{username}/{repo}/releases/latest";
 
-        using WebClient client = new();
-        try
+        var release = await http.GetFromJsonAsync<Release>(apiUrl);
+
+        if (release?.assets != null && release.assets.Count > 0)
         {
-            client.DownloadFile(url, filepath);
-            Console.WriteLine("Source code downloaded: " + filename);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("An error occurred: " + ex.Message);
-        }
-    }
-}
-
-try
-{
-    Console.WriteLine("->Download started.");
-    var latestrelease = github.Repository.Release.GetLatest(username, repo).Result;
-
-    if (latestrelease != null)
-    {
-        var asset = latestrelease.Assets[0];
-        string api_downloadurl = asset.BrowserDownloadUrl;
-        string assetname = asset.Name;
-        string filepath = Path.Combine(Environment.CurrentDirectory, assetname);
-
-        using (WebClient client = new())
-        {
-            client.DownloadFile(api_downloadurl, filepath);
-        }
-
-        Console.WriteLine("Downloaded: " + assetname);
-        if (request == "1")
-        {
-            Console.WriteLine("\nEnter the branch name: (Default: master)");
-#pragma warning disable CS8600
-            string branch = Console.ReadLine();
-#pragma warning restore CS8600
-
-            if (string.IsNullOrEmpty(branch))
+            int index = 0;
+            if (release.assets.Count > 1)
             {
-                branch = "master";
+                Console.WriteLine("Select file:");
+                for (int i = 0; i < release.assets.Count; i++)
+                    Console.WriteLine($"[{i}] {release.assets[i].name}");
+
+                string? input = Console.ReadLine();
+                if (int.TryParse(input, out int selectedIndex) && selectedIndex >= 0 && selectedIndex < release.assets.Count)
+                    index = selectedIndex;
             }
 
-#pragma warning disable CS8604
-            SourceCodeDownload(username, repo, branch);
-#pragma warning restore CS8604
-        }
-    }
-    else
-    {
-        Console.WriteLine("No releases found.");
-        if (request == "1")
-        {
-            Console.WriteLine("\nBranch: (Default: master)");
-#pragma warning disable CS8600
-            string branch = Console.ReadLine();
-#pragma warning restore CS8600
+            var asset = release.assets[index];
+            string path = Path.Combine("Downloads", asset.name!);
 
-            if (string.IsNullOrEmpty(branch))
+            Console.WriteLine($"Downloading {asset.name}...");
+            using var stream = await http.GetStreamAsync(asset.browser_download_url!);
+            using var file = new FileStream(path, FileMode.Create);
+            await stream.CopyToAsync(file);
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Downloaded: " + path);
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine("No files found in this release.");
+            Console.ResetColor();
+        }
+
+        if (getSource == "1")
+        {
+            Console.WriteLine("Branch name (default: main):");
+            string? branch = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(branch)) branch = "main";
+            else if (branch.ToLower() is "main" or "master") branch = branch.ToLower();
+
+            string branchPath = host == "github.com" ? $"refs/heads/{branch}" : branch;
+            string url = $"https://{host}/{username}/{repo}/archive/{branchPath}.zip";
+            string sourcePath = Path.Combine("Downloads", $"{repo}_{branch}.zip");
+
+            Console.WriteLine($"Downloading source ({branch})...");
+            try
             {
-                branch = "master";
+                using var sStream = await http.GetStreamAsync(url);
+                using var sFile = new FileStream(sourcePath, FileMode.Create);
+                await sStream.CopyToAsync(sFile);
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("Source downloaded: " + sourcePath);
+                Console.ResetColor();
             }
-#pragma warning disable CS8604
-            SourceCodeDownload(username, repo, branch);
-#pragma warning restore CS8604
+            catch (HttpRequestException)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"ERROR: Branch '{branch}' not found.");
+                Console.ResetColor();
+            }
         }
     }
+    catch (HttpRequestException)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("ERROR: Repository or host not found.");
+        Console.ResetColor();
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("ERROR: " + ex.Message);
+        Console.ResetColor();
+    }
 }
-catch (Exception ex)
-{
-    Console.WriteLine("ERROR: " + ex.Message);
-}
-goto start;
+
+class Release { public List<Asset>? assets { get; set; } }
+class Asset { public string? name { get; set; } public string? browser_download_url { get; set; } }
